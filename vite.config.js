@@ -5,7 +5,7 @@ import { defineConfig } from 'vite'
 export default defineConfig({
   plugins: [vue()],
   server: {
-    // ส่ง /api ไปที่ `wrangler pages dev` (พอร์ต 8788) เพื่อใช้ hot reload ของ Vite ระหว่างพัฒนา
-    proxy: { '/api': 'http://localhost:8788' },
+    // ส่ง /api ไปที่ `wrangler dev` (พอร์ต 8787) เพื่อใช้ hot reload ของ Vite ระหว่างพัฒนา
+    proxy: { '/api': 'http://localhost:8787' },
   },
 })

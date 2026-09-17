@@ -1,9 +1,15 @@
-# Cloudflare Pages + D1 config
-name = "vfirst"
-pages_build_output_dir = "./dist"
+# Cloudflare Worker (API + static assets) + D1
+name = "vfirst"                 # ต้องตรงกับชื่อ Worker ใน Cloudflare dashboard
+main = "worker/index.js"
 compatibility_date = "2026-09-01"
 
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+run_worker_first = ["/api/*"]   # ให้ /api/* เข้า Worker ก่อน ไม่ถูกตอบเป็น index.html
+
 [[d1_databases]]
-binding = "DB"                 # ใช้ใน Functions เป็น env.DB
+binding = "DB"                  # ใช้ในโค้ดเป็น env.DB
 database_name = "vfirst-db"
-database_id = "cc1ae6e3-1f16-483e-9db9-5592e026cb47"   # ได้จากคำสั่ง: npx wrangler d1 create vfirst-db
+database_id = "cc1ae6e3-1f16-483e-9db9-5592e026cb47"
