@@ -4,8 +4,19 @@
 //   PATCH  /api/products/:id   แก้ไขบางฟิลด์ (เช่น stock)
 //   DELETE /api/products/:id   ลบสินค้า
 const json = (data, status = 200) => Response.json(data, { status })
-const COLS = 'id, sku, name, category, price, stock'
-const EDITABLE = ['name', 'category', 'price', 'stock']
+const COLS = 'id, sku, name, category, price, stock, image_url'
+const EDITABLE = ['name', 'category', 'price', 'stock', 'image_url']
+
+// ลิงก์รูป: ว่างได้ (null) หรือต้องขึ้นต้นด้วย http:// / https://
+function cleanImageUrl(value) {
+  const url = String(value ?? '').trim()
+  if (!url) return { ok: true, value: null }
+  try {
+    const u = new URL(url)
+    if (u.protocol === 'http:' || u.protocol === 'https:') return { ok: true, value: u.href }
+  } catch {}
+  return { ok: false }
+}
 
 async function readJson(request) {
   try {
@@ -29,16 +40,18 @@ async function createProduct(request, env) {
   const category = String(body.category ?? '').trim()
   const price = Number(body.price)
   const stock = Number(body.stock)
+  const image = cleanImageUrl(body.image_url)
 
   if (!sku || !name || !category) return json({ error: 'กรุณากรอกรหัส ชื่อ และหมวดหมู่' }, 400)
   if (!(price >= 0) || !Number.isInteger(stock) || stock < 0)
     return json({ error: 'ราคาและจำนวนต้องเป็นตัวเลขไม่ติดลบ' }, 400)
+  if (!image.ok) return json({ error: 'ลิงก์รูปต้องขึ้นต้นด้วย http:// หรือ https://' }, 400)
 
   try {
     const row = await env.DB.prepare(
-      `INSERT INTO products (sku, name, category, price, stock)
-       VALUES (?1, ?2, ?3, ?4, ?5) RETURNING ${COLS}`
-    ).bind(sku, name, category, price, stock).first()
+      `INSERT INTO products (sku, name, category, price, stock, image_url)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6) RETURNING ${COLS}`
+    ).bind(sku, name, category, price, stock, image.value).first()
     return json(row, 201)
   } catch (e) {
     if (String(e.message).includes('UNIQUE')) return json({ error: `รหัส ${sku} มีอยู่แล้ว` }, 409)
@@ -55,6 +68,11 @@ async function updateProduct(request, env, id) {
   if ('stock' in body && !(Number.isInteger(body.stock) && body.stock >= 0))
     return json({ error: 'จำนวนต้องเป็นจำนวนเต็มไม่ติดลบ' }, 400)
   if ('price' in body && !(Number(body.price) >= 0)) return json({ error: 'ราคาต้องไม่ติดลบ' }, 400)
+  if ('image_url' in body) {
+    const image = cleanImageUrl(body.image_url)
+    if (!image.ok) return json({ error: 'ลิงก์รูปต้องขึ้นต้นด้วย http:// หรือ https://' }, 400)
+    body.image_url = image.value
+  }
 
   const sets = fields.map((k, i) => `${k} = ?${i + 1}`).join(', ')
   const row = await env.DB.prepare(

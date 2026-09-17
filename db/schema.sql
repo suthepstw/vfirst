@@ -7,6 +7,7 @@ CREATE TABLE products (
   category   TEXT    NOT NULL,
   price      REAL    NOT NULL DEFAULT 0 CHECK (price >= 0),
   stock      INTEGER NOT NULL DEFAULT 0 CHECK (stock >= 0),
+  image_url  TEXT,                                   -- ลิงก์รูปสินค้า (ไม่บังคับ)
   created_at TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 

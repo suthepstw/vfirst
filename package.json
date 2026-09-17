@@ -10,7 +10,9 @@
     "db:init:local": "wrangler d1 execute vfirst-db --local --file=db/schema.sql",
     "db:init:remote": "wrangler d1 execute vfirst-db --remote --file=db/schema.sql",
     "deploy": "vite build && wrangler deploy",
-    "cf:dev": "vite build && wrangler dev"
+    "cf:dev": "vite build && wrangler dev",
+    "db:migrate:local": "wrangler d1 execute vfirst-db --local --file=db/migrations/0001_add_image_url.sql",
+    "db:migrate:remote": "wrangler d1 execute vfirst-db --remote --file=db/migrations/0001_add_image_url.sql"
   },
   "dependencies": {
     "vue": "^3.5.42"

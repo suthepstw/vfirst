@@ -12,7 +12,10 @@ const sortKey = ref('id')
 const sortAsc = ref(true)
 const showForm = ref(false)
 const saving = ref(false)
-const form = reactive({ sku: '', name: '', category: categories[0], price: 0, stock: 0 })
+const emptyForm = () => ({ sku: '', name: '', category: categories[0], price: 0, stock: 0, image_url: '' })
+const form = reactive(emptyForm())
+const brokenImages = ref(new Set()) // id ของสินค้าที่โหลดรูปไม่ขึ้น
+const previewBroken = ref(false)
 const LOW_STOCK = 10
 
 // ---------- API (Cloudflare Pages Functions + D1) ----------
@@ -43,6 +46,16 @@ onMounted(loadProducts)
 
 // ---------- helpers ----------
 const baht = new Intl.NumberFormat('th-TH', { style: 'currency', currency: 'THB' })
+
+const isHttpUrl = (v) => /^https?:\/\/\S+$/i.test(String(v ?? '').trim())
+
+function markBroken(id) {
+  brokenImages.value = new Set(brokenImages.value).add(id)
+}
+
+function showImage(p) {
+  return p.image_url && !brokenImages.value.has(p.id)
+}
 
 function stockStatus(stock) {
   if (stock === 0) return { label: 'หมด', cls: 'out' }
@@ -104,6 +117,26 @@ async function changeStock(p, delta) {
   }
 }
 
+// แก้ลิงก์รูปของสินค้า (เว้นว่าง = ลบรูป)
+async function editImage(p) {
+  const input = window.prompt(`ลิงก์รูปของ "${p.name}" (เว้นว่างเพื่อลบรูป)`, p.image_url ?? '')
+  if (input === null) return
+  const url = input.trim()
+  if (url && !isHttpUrl(url)) {
+    error.value = 'ลิงก์รูปต้องขึ้นต้นด้วย http:// หรือ https://'
+    return
+  }
+  try {
+    const updated = await api(`/${p.id}`, { method: 'PATCH', body: JSON.stringify({ image_url: url }) })
+    p.image_url = updated.image_url
+    const s = new Set(brokenImages.value)
+    s.delete(p.id)
+    brokenImages.value = s
+  } catch (e) {
+    error.value = `บันทึกลิงก์รูปไม่สำเร็จ: ${e.message}`
+  }
+}
+
 async function removeProduct(p) {
   if (!window.confirm(`ลบ "${p.name}" ใช่ไหม?`)) return
   try {
@@ -116,6 +149,10 @@ async function removeProduct(p) {
 
 async function addProduct() {
   if (!form.name.trim() || !form.sku.trim()) return
+  if (form.image_url.trim() && !isHttpUrl(form.image_url)) {
+    error.value = 'ลิงก์รูปต้องขึ้นต้นด้วย http:// หรือ https://'
+    return
+  }
   saving.value = true
   error.value = ''
   try {
@@ -124,7 +161,8 @@ async function addProduct() {
       body: JSON.stringify({ ...form, price: Number(form.price) || 0, stock: Number(form.stock) || 0 }),
     })
     products.value.push(created)
-    Object.assign(form, { sku: '', name: '', category: categories[0], price: 0, stock: 0 })
+    Object.assign(form, emptyForm())
+    previewBroken.value = false
     showForm.value = false
   } catch (e) {
     error.value = `เพิ่มสินค้าไม่สำเร็จ: ${e.message}`
@@ -172,6 +210,23 @@ async function addProduct() {
       </label>
       <label>ราคา (บาท)<input v-model.number="form.price" type="number" min="0" step="0.01" /></label>
       <label>จำนวน<input v-model.number="form.stock" type="number" min="0" /></label>
+      <label class="span-2">ลิงก์รูป (ไม่บังคับ)
+        <input
+          v-model="form.image_url"
+          type="url"
+          placeholder="https://…/photo.jpg"
+          @input="previewBroken = false"
+        />
+      </label>
+      <div class="preview">
+        <img
+          v-if="isHttpUrl(form.image_url) && !previewBroken"
+          :src="form.image_url"
+          alt="ตัวอย่างรูป"
+          @error="previewBroken = true"
+        />
+        <span v-else>{{ form.image_url && previewBroken ? 'โหลดรูปไม่ได้' : 'ตัวอย่างรูป' }}</span>
+      </div>
       <button class="primary" type="submit" :disabled="saving">{{ saving ? 'กำลังบันทึก…' : 'บันทึก' }}</button>
     </form>
 
@@ -193,6 +248,7 @@ async function addProduct() {
       <table>
         <thead>
           <tr>
+            <th class="thumb-col">รูป</th>
             <th
               v-for="col in columns"
               :key="col.key"
@@ -208,6 +264,13 @@ async function addProduct() {
         </thead>
         <tbody>
           <tr v-for="p in filtered" :key="p.id">
+            <td class="thumb-col">
+              <button type="button" class="thumb" :title="p.image_url ? 'แก้ลิงก์รูป' : 'เพิ่มลิงก์รูป'" @click="editImage(p)">
+                <img v-if="showImage(p)" :src="p.image_url" :alt="p.name" loading="lazy" @error="markBroken(p.id)" />
+                <span v-else-if="p.image_url" class="no-img">⚠</span>
+                <span v-else class="no-img">+</span>
+              </button>
+            </td>
             <td class="mono">{{ p.sku }}</td>
             <td class="name">{{ p.name }}</td>
             <td>{{ p.category }}</td>
@@ -223,10 +286,10 @@ async function addProduct() {
             <td class="num"><button class="danger" @click="removeProduct(p)">ลบ</button></td>
           </tr>
           <tr v-if="loading">
-            <td colspan="7" class="empty">กำลังโหลดข้อมูล…</td>
+            <td colspan="8" class="empty">กำลังโหลดข้อมูล…</td>
           </tr>
           <tr v-else-if="filtered.length === 0">
-            <td colspan="7" class="empty">ไม่พบสินค้าที่ตรงกับเงื่อนไข</td>
+            <td colspan="8" class="empty">ไม่พบสินค้าที่ตรงกับเงื่อนไข</td>
           </tr>
         </tbody>
       </table>
@@ -481,5 +544,57 @@ tbody tr:hover {
   .badge.ok { color: #4ade80; }
   .badge.low { color: #fbbf24; }
   .badge.out { color: #f87171; }
+}
+.span-2 {
+  grid-column: span 2;
+}
+.preview {
+  width: 64px;
+  height: 64px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  font-size: 11px;
+  text-align: center;
+  background: var(--bg);
+}
+.preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.thumb-col {
+  width: 56px;
+  cursor: default;
+}
+.thumb {
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  background: var(--code-bg);
+}
+.thumb:hover {
+  border-color: var(--accent);
+}
+.thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.no-img {
+  font-size: 18px;
+  color: var(--text);
+  opacity: 0.6;
+}
+@media (max-width: 640px) {
+  .span-2 {
+    grid-column: auto;
+  }
 }
 </style>
