@@ -1,7 +1,7 @@
 <script setup>
-import HelloWorld from './components/HelloWorld.vue'
+import ProductTable from './components/ProductTable.vue'
 </script>
 
 <template>
-  <HelloWorld />
+  <ProductTable />
 </template>
