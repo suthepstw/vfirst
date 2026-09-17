@@ -1,16 +1,45 @@
 <script setup>
-import { ref, reactive, computed } from 'vue'
-import { categories, initialProducts } from '../data/products.js'
+import { ref, reactive, computed, onMounted } from 'vue'
+import { categories } from '../data/products.js'
 
 // ---------- state ----------
-const products = ref(initialProducts.map((p) => ({ ...p })))
+const products = ref([])
+const loading = ref(true)
+const error = ref('')
 const search = ref('')
 const category = ref('ทั้งหมด')
 const sortKey = ref('id')
 const sortAsc = ref(true)
 const showForm = ref(false)
+const saving = ref(false)
 const form = reactive({ sku: '', name: '', category: categories[0], price: 0, stock: 0 })
 const LOW_STOCK = 10
+
+// ---------- API (Cloudflare Pages Functions + D1) ----------
+async function api(path, options = {}) {
+  const res = await fetch(`/api/products${path}`, {
+    headers: { 'Content-Type': 'application/json' },
+    ...options,
+  })
+  if (res.status === 204) return null
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(data.error || `เกิดข้อผิดพลาด (${res.status})`)
+  return data
+}
+
+async function loadProducts() {
+  loading.value = true
+  error.value = ''
+  try {
+    products.value = await api('')
+  } catch (e) {
+    error.value = `โหลดข้อมูลไม่สำเร็จ: ${e.message}`
+  } finally {
+    loading.value = false
+  }
+}
+
+onMounted(loadProducts)
 
 // ---------- helpers ----------
 const baht = new Intl.NumberFormat('th-TH', { style: 'currency', currency: 'THB' })
@@ -61,33 +90,47 @@ function sortBy(key) {
   }
 }
 
-function changeStock(p, delta) {
-  p.stock = Math.max(0, p.stock + delta)
+// อัปเดตหน้าจอทันที แล้วส่งไปบันทึก ถ้าไม่สำเร็จให้คืนค่าเดิม
+async function changeStock(p, delta) {
+  const old = p.stock
+  const next = Math.max(0, old + delta)
+  if (next === old) return
+  p.stock = next
+  try {
+    await api(`/${p.id}`, { method: 'PATCH', body: JSON.stringify({ stock: next }) })
+  } catch (e) {
+    p.stock = old
+    error.value = `ปรับสต็อกไม่สำเร็จ: ${e.message}`
+  }
 }
 
-function removeProduct(id) {
-  products.value = products.value.filter((p) => p.id !== id)
+async function removeProduct(p) {
+  if (!window.confirm(`ลบ "${p.name}" ใช่ไหม?`)) return
+  try {
+    await api(`/${p.id}`, { method: 'DELETE' })
+    products.value = products.value.filter((x) => x.id !== p.id)
+  } catch (e) {
+    error.value = `ลบไม่สำเร็จ: ${e.message}`
+  }
 }
 
-function addProduct() {
+async function addProduct() {
   if (!form.name.trim() || !form.sku.trim()) return
-  const nextId = Math.max(0, ...products.value.map((p) => p.id)) + 1
-  products.value.push({
-    id: nextId,
-    sku: form.sku.trim().toUpperCase(),
-    name: form.name.trim(),
-    category: form.category,
-    price: Number(form.price) || 0,
-    stock: Number(form.stock) || 0,
-  })
-  Object.assign(form, { sku: '', name: '', category: categories[0], price: 0, stock: 0 })
-  showForm.value = false
-}
-
-function resetData() {
-  products.value = initialProducts.map((p) => ({ ...p }))
-  search.value = ''
-  category.value = 'ทั้งหมด'
+  saving.value = true
+  error.value = ''
+  try {
+    const created = await api('', {
+      method: 'POST',
+      body: JSON.stringify({ ...form, price: Number(form.price) || 0, stock: Number(form.stock) || 0 }),
+    })
+    products.value.push(created)
+    Object.assign(form, { sku: '', name: '', category: categories[0], price: 0, stock: 0 })
+    showForm.value = false
+  } catch (e) {
+    error.value = `เพิ่มสินค้าไม่สำเร็จ: ${e.message}`
+  } finally {
+    saving.value = false
+  }
 }
 </script>
 
@@ -96,15 +139,19 @@ function resetData() {
     <header class="top">
       <div>
         <h1>ตารางสินค้า</h1>
-        <p class="sub">Demo Vue 3: ค้นหา กรอง เรียงลำดับ เพิ่ม/ลบ และปรับสต็อก</p>
+        <p class="sub">Demo Vue 3 + Cloudflare D1: ค้นหา กรอง เรียงลำดับ เพิ่ม/ลบ และปรับสต็อก</p>
       </div>
       <div class="actions">
-        <button class="ghost" @click="resetData">รีเซ็ตข้อมูล</button>
+        <button class="ghost" @click="loadProducts" :disabled="loading">โหลดใหม่</button>
         <button class="primary" @click="showForm = !showForm">
           {{ showForm ? 'ปิดฟอร์ม' : '+ เพิ่มสินค้า' }}
         </button>
       </div>
     </header>
+
+    <p v-if="error" class="error" role="alert">
+      {{ error }} <button class="link" @click="error = ''">ปิด</button>
+    </p>
 
     <!-- สรุปตัวเลข -->
     <div class="stats">
@@ -125,7 +172,7 @@ function resetData() {
       </label>
       <label>ราคา (บาท)<input v-model.number="form.price" type="number" min="0" step="0.01" /></label>
       <label>จำนวน<input v-model.number="form.stock" type="number" min="0" /></label>
-      <button class="primary" type="submit">บันทึก</button>
+      <button class="primary" type="submit" :disabled="saving">{{ saving ? 'กำลังบันทึก…' : 'บันทึก' }}</button>
     </form>
 
     <!-- ตัวกรอง -->
@@ -173,9 +220,12 @@ function resetData() {
               </div>
             </td>
             <td><span :class="['badge', stockStatus(p.stock).cls]">{{ stockStatus(p.stock).label }}</span></td>
-            <td class="num"><button class="danger" @click="removeProduct(p.id)">ลบ</button></td>
+            <td class="num"><button class="danger" @click="removeProduct(p)">ลบ</button></td>
           </tr>
-          <tr v-if="filtered.length === 0">
+          <tr v-if="loading">
+            <td colspan="7" class="empty">กำลังโหลดข้อมูล…</td>
+          </tr>
+          <tr v-else-if="filtered.length === 0">
             <td colspan="7" class="empty">ไม่พบสินค้าที่ตรงกับเงื่อนไข</td>
           </tr>
         </tbody>
@@ -238,6 +288,20 @@ button:disabled {
 .danger:hover {
   background: rgba(217, 45, 32, 0.1);
   border-color: rgba(217, 45, 32, 0.4);
+}
+
+.error {
+  margin: 16px 0 0;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: rgba(220, 38, 38, 0.1);
+  color: #dc2626;
+}
+.link {
+  border: none;
+  padding: 0 4px;
+  text-decoration: underline;
+  color: inherit;
 }
 
 .stats {
