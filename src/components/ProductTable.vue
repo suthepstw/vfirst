@@ -1,6 +1,7 @@
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
 import { categories } from '../data/products.js'
+import { api as request } from '../api.js'
 
 // ---------- state ----------
 const products = ref([])
@@ -18,17 +19,8 @@ const brokenImages = ref(new Set()) // id ของสินค้าที่�
 const previewBroken = ref(false)
 const LOW_STOCK = 10
 
-// ---------- API (Cloudflare Pages Functions + D1) ----------
-async function api(path, options = {}) {
-  const res = await fetch(`/api/products${path}`, {
-    headers: { 'Content-Type': 'application/json' },
-    ...options,
-  })
-  if (res.status === 204) return null
-  const data = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error(data.error || `เกิดข้อผิดพลาด (${res.status})`)
-  return data
-}
+// ---------- API (Cloudflare Worker + D1) ----------
+const api = (path, options) => request(`/products${path}`, options)
 
 async function loadProducts() {
   loading.value = true
@@ -110,7 +102,7 @@ async function changeStock(p, delta) {
   if (next === old) return
   p.stock = next
   try {
-    await api(`/${p.id}`, { method: 'PATCH', body: JSON.stringify({ stock: next }) })
+    await api(`/${p.id}`, { method: 'PATCH', body: { stock: next } })
   } catch (e) {
     p.stock = old
     error.value = `ปรับสต็อกไม่สำเร็จ: ${e.message}`
@@ -127,7 +119,7 @@ async function editImage(p) {
     return
   }
   try {
-    const updated = await api(`/${p.id}`, { method: 'PATCH', body: JSON.stringify({ image_url: url }) })
+    const updated = await api(`/${p.id}`, { method: 'PATCH', body: { image_url: url } })
     p.image_url = updated.image_url
     const s = new Set(brokenImages.value)
     s.delete(p.id)
@@ -158,7 +150,7 @@ async function addProduct() {
   try {
     const created = await api('', {
       method: 'POST',
-      body: JSON.stringify({ ...form, price: Number(form.price) || 0, stock: Number(form.stock) || 0 }),
+      body: { ...form, price: Number(form.price) || 0, stock: Number(form.stock) || 0 },
     })
     products.value.push(created)
     Object.assign(form, emptyForm())
